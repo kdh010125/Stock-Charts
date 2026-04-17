@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Charts</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Stock Charts & Predictions</h1>
+    <p class="subhead">Guest mode supported · Optional signup/login · Real-time simulation</p>
+  </header>
+
+  <main>
+    <section class="card auth-card">
+      <h2>Authentication (Optional)</h2>
+      <form id="auth-form">
+        <input id="username" type="text" placeholder="Username" required />
+        <input id="password" type="password" placeholder="Password" required />
+        <div class="row">
+          <button type="button" id="signup-btn">Sign up</button>
+          <button type="button" id="login-btn">Log in</button>
+          <button type="button" id="logout-btn">Log out</button>
+        </div>
+      </form>
+      <p id="auth-status">Not signed in (guest mode).</p>
+    </section>
+
+    <section class="card">
+      <h2>Stocks</h2>
+      <div class="controls">
+        <input id="search" placeholder="Search by name or symbol" />
+        <select id="sector-filter">
+          <option value="">All sectors</option>
+        </select>
+      </div>
+      <div id="stock-list" class="stock-list"></div>
+    </section>
+
+    <section class="card">
+      <h2>Favorites</h2>
+      <div id="favorites" class="chip-list"></div>
+    </section>
+
+    <section class="card">
+      <h2 id="selected-stock-title">Select a stock</h2>
+      <p id="selected-stock-meta"></p>
+      <canvas id="chart" width="900" height="260" aria-label="stock chart"></canvas>
+      <div id="indicators" class="metrics"></div>
+      <div id="analysis" class="analysis"></div>
+    </section>
+
+    <section class="card split">
+      <div>
+        <h2>News & Sentiment</h2>
+        <ul id="news-list"></ul>
+      </div>
+      <div>
+        <h2>Portfolio</h2>
+        <form id="portfolio-form" class="controls">
+          <input id="shares" type="number" min="1" step="1" placeholder="Shares" required />
+          <button type="submit">Add Holding</button>
+        </form>
+        <div id="portfolio-summary"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Alerts</h2>
+      <form id="alert-form" class="controls">
+        <input id="price-alert" type="number" step="0.01" placeholder="Price target" required />
+        <select id="prediction-alert">
+          <option value="UP">Prediction: UP</option>
+          <option value="DOWN">Prediction: DOWN</option>
+        </select>
+        <button type="submit">Set Alert</button>
+      </form>
+      <ul id="alert-log"></ul>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
