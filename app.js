@@ -84,7 +84,7 @@ function predict(values) {
   return {
     direction,
     confidence,
-    reason: `Price vs MA10 (${(last - ma10).toFixed(2)}) and 5-tick momentum (${momentum.toFixed(2)}) imply ${direction}.`
+    reason: `Price vs MA10 (${(last - ma10).toFixed(2)}) and 5-period momentum (${momentum.toFixed(2)}) imply ${direction}.`
   };
 }
 
@@ -210,7 +210,22 @@ function updateAuthStatus() {
 }
 
 function maybeNotify(message) {
-  if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification(message);
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") void new Notification(message);
+}
+
+function fallbackHash(input) {
+  let hash = 5381;
+  for (let i = 0; i < input.length; i += 1) hash = ((hash << 5) + hash) + input.charCodeAt(i);
+  return `djb2:${(hash >>> 0).toString(16)}`;
+}
+
+async function hashPassword(password) {
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    const bytes = new TextEncoder().encode(password);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return `sha256:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  }
+  return fallbackHash(password);
 }
 
 function renderSelected() {
@@ -268,21 +283,23 @@ function init() {
 
   ["search", "sector-filter"].forEach((id) => el(id).addEventListener("input", renderStocks));
 
-  el("signup-btn").onclick = () => {
+  el("signup-btn").onclick = async () => {
     const u = el("username").value.trim();
     const p = el("password").value;
     if (!u || !p) return;
-    localStorage.setItem(`auth:${u}`, p);
+    localStorage.setItem(`auth:${u}`, await hashPassword(p));
     user = u;
     localStorage.setItem("user", user);
     updateAuthStatus();
   };
 
-  el("login-btn").onclick = () => {
+  el("login-btn").onclick = async () => {
     const u = el("username").value.trim();
     const p = el("password").value;
     const saved = localStorage.getItem(`auth:${u}`);
-    if (saved && saved === p) {
+    const hashed = await hashPassword(p);
+    if (saved && (saved === hashed || saved === p)) {
+      if (saved === p) localStorage.setItem(`auth:${u}`, hashed);
       user = u;
       localStorage.setItem("user", user);
       updateAuthStatus();
