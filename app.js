@@ -16,6 +16,14 @@ const NEWS = {
 
 const POSITIVE = ["positive", "growth", "improve", "resilient", "accelerates"];
 const NEGATIVE = ["mixed", "risk", "fall", "weak", "decline"];
+const INITIAL_HISTORY_POINTS = 80;
+const MAX_HISTORY_POINTS = 100;
+const TICK_INTERVAL_MS = 2000;
+const PREDICTION_CONF_MIN = 52;
+const PREDICTION_CONF_MAX = 95;
+const PREDICTION_CONF_BASE = 60;
+const PREDICTION_CONF_SCALE = 4;
+const DEMO_AUTH_WARNING = "Demo-only local auth (not for production use).";
 
 let selectedSymbol = "AAPL";
 let user = localStorage.getItem("user") || "";
@@ -27,7 +35,7 @@ let alerts = JSON.parse(localStorage.getItem("alerts") || "[]");
 STOCKS.forEach((stock) => {
   const values = [];
   let p = stock.base;
-  for (let i = 0; i < 80; i += 1) {
+  for (let i = 0; i < INITIAL_HISTORY_POINTS; i += 1) {
     p += (Math.random() - 0.48) * 2;
     values.push(Number(p.toFixed(2)));
   }
@@ -80,7 +88,10 @@ function predict(values) {
   const momentum = last - values.at(-6);
   const score = (last - ma10) + momentum * 0.8;
   const direction = score >= 0 ? "UP" : "DOWN";
-  const confidence = Math.min(95, Math.max(52, Math.round(60 + Math.abs(score) * 4)));
+  const confidence = Math.min(
+    PREDICTION_CONF_MAX,
+    Math.max(PREDICTION_CONF_MIN, Math.round(PREDICTION_CONF_BASE + Math.abs(score) * PREDICTION_CONF_SCALE))
+  );
   return {
     direction,
     confidence,
@@ -206,7 +217,9 @@ function renderAlerts() {
 }
 
 function updateAuthStatus() {
-  el("auth-status").textContent = user ? `Signed in as ${user}` : "Not signed in (guest mode).";
+  el("auth-status").textContent = user
+    ? `Signed in as ${user}. ${DEMO_AUTH_WARNING}`
+    : `Not signed in (guest mode). ${DEMO_AUTH_WARNING}`;
 }
 
 function maybeNotify(message) {
@@ -217,19 +230,13 @@ function maybeNotify(message) {
   }
 }
 
-function fallbackHash(input) {
-  let hash = 5381;
-  for (let i = 0; i < input.length; i += 1) hash = ((hash << 5) + hash) + input.charCodeAt(i);
-  return `djb2:${(hash >>> 0).toString(16)}`;
-}
-
 async function hashPassword(password) {
   if (typeof crypto !== "undefined" && crypto.subtle) {
     const bytes = new TextEncoder().encode(password);
     const digest = await crypto.subtle.digest("SHA-256", bytes);
     return `sha256:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
   }
-  return fallbackHash(password);
+  return null;
 }
 
 function renderSelected() {
@@ -237,14 +244,17 @@ function renderSelected() {
   const values = series[selectedSymbol];
   const latest = values.at(-1);
   const ma20 = movingAverage(values, 20);
+  const rsi14 = rsi(values);
+  const macdValue = macd(values);
   const p = predict(values);
   el("selected-stock-title").textContent = `${stock.name} (${stock.symbol})`;
   el("selected-stock-meta").textContent = `${stock.sector} · Latest: $${latest.toFixed(2)} · Historical points: ${values.length}`;
+  el("chart").setAttribute("aria-label", `${stock.symbol} stock chart, latest price ${latest.toFixed(2)} dollars`);
   drawChart(values);
   el("indicators").innerHTML = [
-    `MA20: ${ma20.toFixed(2)}`,
-    `RSI14: ${rsi(values).toFixed(2)}`,
-    `MACD: ${macd(values).toFixed(2)}`,
+    `MA20: ${ma20 === null ? "N/A" : ma20.toFixed(2)}`,
+    `RSI14: ${rsi14 === null ? "N/A" : rsi14.toFixed(2)}`,
+    `MACD: ${macdValue === null ? "N/A" : macdValue.toFixed(2)}`,
     `AI prediction: ${p.direction} (${p.confidence}%)`
   ].map((m) => `<div class="card">${m}</div>`).join("");
   el("analysis").textContent = `Explainable AI: ${p.reason}`;
@@ -258,12 +268,12 @@ function tick() {
     const arr = series[s.symbol];
     const next = Number((arr.at(-1) + (Math.random() - 0.5) * 1.6).toFixed(2));
     arr.push(Math.max(1, next));
-    if (arr.length > 100) arr.shift();
+    if (arr.length > MAX_HISTORY_POINTS) arr.shift();
   });
   alerts = alerts.map((a) => {
     if (a.status === "triggered") return a;
     const p = predict(series[a.symbol]);
-    const priceHit = a.priceTarget != null && series[a.symbol].at(-1) >= a.priceTarget;
+    const priceHit = a.priceTarget !== null && series[a.symbol].at(-1) >= a.priceTarget;
     const predHit = a.predictionTarget && p.direction === a.predictionTarget;
     if (priceHit || predHit) {
       maybeNotify(`Alert triggered for ${a.symbol}`);
@@ -291,7 +301,12 @@ function init() {
     const u = el("username").value.trim();
     const p = el("password").value;
     if (!u || !p) return;
-    localStorage.setItem(`auth:${u}`, await hashPassword(p));
+    const hashed = await hashPassword(p);
+    if (!hashed) {
+      el("auth-status").textContent = "Secure auth unavailable in this browser.";
+      return;
+    }
+    localStorage.setItem(`auth:${u}`, hashed);
     user = u;
     localStorage.setItem("user", user);
     updateAuthStatus();
@@ -302,6 +317,10 @@ function init() {
     const p = el("password").value;
     const saved = localStorage.getItem(`auth:${u}`);
     const hashed = await hashPassword(p);
+    if (!hashed) {
+      el("auth-status").textContent = "Secure auth unavailable in this browser.";
+      return;
+    }
     if (saved && saved === hashed) {
       user = u;
       localStorage.setItem("user", user);
@@ -330,10 +349,11 @@ function init() {
   el("alert-form").onsubmit = (e) => {
     e.preventDefault();
     const priceTarget = Number(el("price-alert").value);
+    if (!Number.isFinite(priceTarget)) return;
     const predictionTarget = el("prediction-alert").value;
     alerts.push({
       symbol: selectedSymbol,
-      priceTarget: Number.isFinite(priceTarget) ? priceTarget : null,
+      priceTarget,
       predictionTarget,
       status: "active"
     });
@@ -347,7 +367,7 @@ function init() {
   renderStocks();
   renderFavorites();
   renderSelected();
-  setInterval(tick, 2000);
+  setInterval(tick, TICK_INTERVAL_MS);
 }
 
 init();
