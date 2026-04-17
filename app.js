@@ -210,7 +210,11 @@ function updateAuthStatus() {
 }
 
 function maybeNotify(message) {
-  if (typeof Notification !== "undefined" && Notification.permission === "granted") void new Notification(message);
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    try {
+      new Notification(message);
+    } catch (_) {}
+  }
 }
 
 function fallbackHash(input) {
@@ -298,8 +302,7 @@ function init() {
     const p = el("password").value;
     const saved = localStorage.getItem(`auth:${u}`);
     const hashed = await hashPassword(p);
-    if (saved && (saved === hashed || saved === p)) {
-      if (saved === p) localStorage.setItem(`auth:${u}`, hashed);
+    if (saved && saved === hashed) {
       user = u;
       localStorage.setItem("user", user);
       updateAuthStatus();
