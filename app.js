@@ -83,10 +83,13 @@ function macd(values) {
 }
 
 function predict(values) {
+  if (values.length < 2) {
+    return { direction: "UP", confidence: PREDICTION_CONF_MIN, reason: "Insufficient data." };
+  }
   const last = values.at(-1);
   const ma10 = movingAverage(values, 10);
-  const momentum = last - values.at(-6);
-  const score = (last - ma10) + momentum * 0.8;
+  const momentum = last - (values.length >= 6 ? values.at(-6) : values[0]);
+  const score = ((ma10 === null ? 0 : last - ma10)) + momentum * 0.8;
   const direction = score >= 0 ? "UP" : "DOWN";
   const confidence = Math.min(
     PREDICTION_CONF_MAX,
@@ -211,7 +214,7 @@ function renderAlerts() {
   root.innerHTML = "";
   alerts.forEach((a) => {
     const li = document.createElement("li");
-    li.textContent = `${a.symbol}: price ≥ ${a.priceTarget ?? "-"} / prediction ${a.predictionTarget ?? "-"} (${a.status || "active"})`;
+    li.textContent = `${a.symbol}: price ≥ ${a.priceTarget ?? "-"} / prediction ${a.predictionTarget ?? "-"} (${a.status ?? "active"})`;
     root.append(li);
   });
 }
@@ -230,11 +233,24 @@ function maybeNotify(message) {
   }
 }
 
-async function hashPassword(password) {
+async function hashPassword(username, password, createSalt) {
   if (typeof crypto !== "undefined" && crypto.subtle) {
+    let salt = localStorage.getItem(`salt:${username}`);
+    if (!salt && createSalt) {
+      const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+      salt = btoa(String.fromCharCode(...saltBytes));
+      localStorage.setItem(`salt:${username}`, salt);
+    }
+    if (!salt) return null;
     const bytes = new TextEncoder().encode(password);
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    return `sha256:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+    const keyMaterial = await crypto.subtle.importKey("raw", bytes, "PBKDF2", false, ["deriveBits"]);
+    const saltBytes = Uint8Array.from(atob(salt), (c) => c.charCodeAt(0));
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt: saltBytes, iterations: 100000, hash: "SHA-256" },
+      keyMaterial,
+      256
+    );
+    return `pbkdf2:${[...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
   }
   return null;
 }
@@ -273,7 +289,7 @@ function tick() {
   alerts = alerts.map((a) => {
     if (a.status === "triggered") return a;
     const p = predict(series[a.symbol]);
-    const priceHit = a.priceTarget !== null && series[a.symbol].at(-1) >= a.priceTarget;
+    const priceHit = a.priceTarget !== null && a.priceTarget !== undefined && series[a.symbol].at(-1) >= a.priceTarget;
     const predHit = a.predictionTarget && p.direction === a.predictionTarget;
     if (priceHit || predHit) {
       maybeNotify(`Alert triggered for ${a.symbol}`);
@@ -301,7 +317,7 @@ function init() {
     const u = el("username").value.trim();
     const p = el("password").value;
     if (!u || !p) return;
-    const hashed = await hashPassword(p);
+    const hashed = await hashPassword(u, p, true);
     if (!hashed) {
       el("auth-status").textContent = "Secure auth unavailable in this browser.";
       return;
@@ -316,7 +332,7 @@ function init() {
     const u = el("username").value.trim();
     const p = el("password").value;
     const saved = localStorage.getItem(`auth:${u}`);
-    const hashed = await hashPassword(p);
+    const hashed = await hashPassword(u, p, false);
     if (!hashed) {
       el("auth-status").textContent = "Secure auth unavailable in this browser.";
       return;
@@ -339,7 +355,10 @@ function init() {
   el("portfolio-form").onsubmit = (e) => {
     e.preventDefault();
     const shares = Number(el("shares").value);
-    if (!Number.isFinite(shares) || shares < 1) return;
+    if (!Number.isFinite(shares) || shares < 1) {
+      el("portfolio-summary").textContent = "Please enter a valid share count.";
+      return;
+    }
     portfolio[selectedSymbol] = (portfolio[selectedSymbol] || 0) + shares;
     saveState();
     renderPortfolio();
@@ -349,7 +368,10 @@ function init() {
   el("alert-form").onsubmit = (e) => {
     e.preventDefault();
     const priceTarget = Number(el("price-alert").value);
-    if (!Number.isFinite(priceTarget)) return;
+    if (!Number.isFinite(priceTarget)) {
+      el("alert-log").innerHTML = "<li>Please enter a valid price target.</li>";
+      return;
+    }
     const predictionTarget = el("prediction-alert").value;
     alerts.push({
       symbol: selectedSymbol,
